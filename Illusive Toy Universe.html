@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Toy Universe — Browser Simulation</title>
+<style>
+body {
+  margin: 0;
+  background: black;
+  overflow: hidden;
+}
+canvas {
+  display: block;
+  margin: auto;
+  background: black;
+}
+</style>
+</head>
+
+<body>
+<canvas id="universe"></canvas>
+
+<script>
+const MOD = 3;
+const EDGE_THRESHOLD = 3;
+const ZOOM_PADDING = 20;
+const LIFE_SPAWN_STEP = 37;
+const STRETCH = 2.5;
+
+let size = 60;
+let step = 0;
+
+let grid = new Uint8Array(size * size);
+let life = new Uint8Array(size * size);
+
+const canvas = document.getElementById("universe");
+const ctx = canvas.getContext("2d");
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+function idx(x, y) {
+  return x * size + y;
+}
+
+// Seed center
+function seed() {
+  const c = Math.floor(size / 2);
+  for (let dx = -3; dx <= 3; dx++) {
+    for (let dy = -3; dy <= 3; dy++) {
+      grid[idx(c + dx, c + dy)] = Math.floor(Math.random() * MOD);
+    }
+  }
+}
+
+function neighbors(field, x, y) {
+  let vals = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      if (dx === 0 && dy === 0) continue;
+      let nx = x + dx;
+      let ny = y + dy;
+      if (nx >= 0 && ny >= 0 && nx < size && ny < size)
+        vals.push(field[idx(nx, ny)]);
+      else
+        vals.push(0);
+    }
+  }
+  return vals;
+}
+
+function spawnLife() {
+  let best = 0;
+  let bx = 0, by = 0;
+
+  for (let x = 1; x < size - 1; x++) {
+    for (let y = 1; y < size - 1; y++) {
+      let n = neighbors(grid, x, y);
+      let mean = n.reduce((a,b)=>a+b)/n.length;
+      let variance = n.reduce((a,b)=>a+(b-mean)**2,0)/n.length;
+      if (variance > best) {
+        best = variance;
+        bx = x;
+        by = y;
+      }
+    }
+  }
+
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dy = -2; dy <= 2; dy++) {
+      let x = bx + dx;
+      let y = by + dy;
+      if (x>=0 && y>=0 && x<size && y<size)
+        life[idx(x,y)] = 1;
+    }
+  }
+}
+
+function zoomOut() {
+  let active = false;
+
+  for (let x = 0; x < size; x++) {
+    for (let y = 0; y < size; y++) {
+      if (grid[idx(x,y)] || life[idx(x,y)]) {
+        if (
+          x < EDGE_THRESHOLD ||
+          y < EDGE_THRESHOLD ||
+          x > size - EDGE_THRESHOLD - 1 ||
+          y > size - EDGE_THRESHOLD - 1
+        ) active = true;
+      }
+    }
+  }
+
+  if (!active) return;
+
+  const newSize = size + 2 * ZOOM_PADDING;
+  const newGrid = new Uint8Array(newSize * newSize);
+  const newLife = new Uint8Array(newSize * newSize);
+
+  for (let x = 0; x < size; x++) {
+    for (let y = 0; y < size; y++) {
+      let nx = x + ZOOM_PADDING;
+      let ny = y + ZOOM_PADDING;
+      newGrid[nx * newSize + ny] = grid[idx(x,y)];
+      newLife[nx * newSize + ny] = life[idx(x,y)];
+    }
+  }
+
+  size = newSize;
+  grid = newGrid;
+  life = newLife;
+}
+
+function stepUniverse() {
+  if (step === LIFE_SPAWN_STEP) spawnLife();
+
+  const newGrid = new Uint8Array(grid.length);
+  const newLife = new Uint8Array(life.length);
+
+  for (let x = 0; x < size; x++) {
+    for (let y = 0; y < size; y++) {
+
+      let n = neighbors(grid, x, y);
+      let cell = grid[idx(x,y)];
+
+      let total = n.reduce((a,b)=>a+b) % MOD;
+      let dominant = n.sort((a,b)=>
+        n.filter(v=>v===a).length -
+        n.filter(v=>v===b).length
+      ).pop();
+
+      if (n.filter(v=>v===cell).length === 2 ||
+          n.filter(v=>v===cell).length === 3)
+        newGrid[idx(x,y)] = cell;
+      else
+        newGrid[idx(x,y)] = (cell + dominant + total) % MOD;
+
+      // life
+      let ln = neighbors(life, x, y).reduce((a,b)=>a+b);
+      let variance = Math.random(); // cheap approximation
+
+      if (life[idx(x,y)]) {
+        newLife[idx(x,y)] = (ln >= 1 && ln <= 5) ? 1 : 0;
+      } else {
+        if (ln >= 1 && variance > 0.3)
+          newLife[idx(x,y)] = 1;
+      }
+    }
+  }
+
+  grid = newGrid;
+  life = newLife;
+  zoomOut();
+  step++;
+}
+
+function draw() {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  const img = ctx.createImageData(w, h);
+  const cx = w / 2;
+  const cy = h / 2;
+
+  for (let px = 0; px < w; px++) {
+    for (let py = 0; py < h; py++) {
+
+      const ex = (px - cx) / (cx);
+      const ey = (py - cy) / (cy);
+      if (ex*ex + ey*ey > 1) continue;
+
+      const gx = Math.floor(px / w * size);
+      const gy = Math.floor(py / h * size);
+
+      const i = (py*w + px)*4;
+
+      if (life[idx(gx,gy)]) {
+        img.data[i] = 255;
+        img.data[i+1] = 0;
+        img.data[i+2] = 0;
+      } else {
+        img.data[i] = 0;
+        img.data[i+1] = 0;
+        img.data[i+2] = grid[idx(gx,gy)] * 120;
+      }
+      img.data[i+3] = 255;
+    }
+  }
+
+  ctx.putImageData(img,0,0);
+}
+
+function loop() {
+  stepUniverse();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+seed();
+loop();
+</script>
+</body>
+</html>

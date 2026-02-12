@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Null Unity Simulation</title>
+<style>
+body { margin:0; background:#0f172a; color:white; font-family:sans-serif; text-align:center; }
+canvas { background:#020617; border:1px solid #334155; margin:10px; }
+button {
+  background:#1f2937;
+  color:white;
+  border:1px solid #334155;
+  padding:6px 12px;
+  cursor:pointer;
+  margin-top:8px;
+}
+button:hover { background:#374151; }
+</style>
+</head>
+<body>
+
+<h3>Null Unity Graph — Path Creation / Annihilation</h3>
+<button id="clearBtn">Clear Paths</button>
+<br>
+<canvas id="c" width="1000" height="700"></canvas>
+
+<script>
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const clearBtn = document.getElementById("clearBtn");
+
+const N = 120;
+const R = 150;
+const CREATE_PROB = 0.6;
+
+class Node {
+  constructor(id,x,y){
+    this.id=id;
+    this.x=x;
+    this.y=y;
+    this.edges=[];
+  }
+}
+
+let nodes=[];
+let selected=null;
+let activePath=[];
+let persistentPaths=[]; // ← NEW
+let failedPath=[];
+let wiggle=0;
+
+clearBtn.onclick = () => {
+  persistentPaths=[];
+  activePath=[];
+};
+
+function dist(a,b){
+  return Math.hypot(a.x-b.x,a.y-b.y);
+}
+
+function gen(){
+  nodes=[];
+  for(let i=0;i<N;i++){
+    nodes.push(new Node(
+      i,
+      Math.random()*(canvas.width-80)+40,
+      Math.random()*(canvas.height-80)+40
+    ));
+  }
+
+  for(let a of nodes){
+    for(let b of nodes){
+      if(a!==b && dist(a,b)<R && Math.random()<0.35){
+        a.edges.push(b.id);
+      }
+    }
+  }
+}
+
+function bfs(s,t){
+  let q=[[s]];
+  let seen=new Set([s]);
+
+  while(q.length){
+    let p=q.shift();
+    let last=p[p.length-1];
+    if(last===t) return p;
+
+    for(let n of nodes[last].edges){
+      if(!seen.has(n)){
+        seen.add(n);
+        q.push([...p,n]);
+      }
+    }
+  }
+  return null;
+}
+
+function replaceFailed(){
+  let set=new Set(failedPath);
+
+  for(let id of set){
+    let n=nodes[id];
+    n.x=Math.random()*(canvas.width-80)+40;
+    n.y=Math.random()*(canvas.height-80)+40;
+    n.edges=[];
+  }
+
+  for(let id of set){
+    let a=nodes[id];
+    for(let b of nodes){
+      if(a!==b && dist(a,b)<R && Math.random()<0.35){
+        a.edges.push(b.id);
+      }
+    }
+  }
+
+  failedPath=[];
+}
+
+function drawEdges(){
+  ctx.strokeStyle="#1f2937";
+  ctx.lineWidth=1;
+
+  for(let n of nodes){
+    for(let e of n.edges){
+      ctx.beginPath();
+      ctx.moveTo(n.x,n.y);
+      ctx.lineTo(nodes[e].x,nodes[e].y);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawPath(path,color,width=4,wiggleOn=false){
+  if(path.length<2) return;
+
+  ctx.strokeStyle=color;
+  ctx.lineWidth=width;
+  ctx.beginPath();
+
+  let off=wiggleOn?Math.sin(performance.now()*0.1)*5:0;
+
+  let f=nodes[path[0]];
+  ctx.moveTo(f.x+off,f.y-off);
+
+  for(let i=1;i<path.length;i++){
+    let n=nodes[path[i]];
+    ctx.lineTo(n.x+off,n.y-off);
+  }
+
+  ctx.stroke();
+}
+
+function drawNodes(){
+  for(let n of nodes){
+    ctx.beginPath();
+    ctx.arc(n.x,n.y,6,0,Math.PI*2);
+
+    if(activePath.includes(n.id))
+      ctx.fillStyle="#4ade80";
+    else if(failedPath.includes(n.id)&&wiggle>0)
+      ctx.fillStyle="#ef4444";
+    else if(selected===n.id)
+      ctx.fillStyle="#f59e0b";
+    else
+      ctx.fillStyle="#e5e7eb";
+
+    ctx.fill();
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  drawEdges();
+
+  // persistent paths (dimmer green)
+  for(let p of persistentPaths){
+    drawPath(p,"#22c55e",2,false);
+  }
+
+  // active path (bright green)
+  drawPath(activePath,"#4ade80",5,false);
+
+  // failed path
+  drawPath(failedPath,"#ef4444",4,wiggle>0);
+
+  drawNodes();
+}
+
+function loop(){
+  if(wiggle>0){
+    wiggle--;
+    if(wiggle===0 && failedPath.length)
+      replaceFailed();
+  }
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+canvas.onclick=e=>{
+  let r=canvas.getBoundingClientRect();
+  let x=e.clientX-r.left;
+  let y=e.clientY-r.top;
+
+  let hit=null;
+  for(let n of nodes){
+    if(Math.hypot(n.x-x,n.y-y)<10){
+      hit=n.id;
+      break;
+    }
+  }
+
+  if(hit===null) return;
+
+  if(selected===null){
+    selected=hit;
+  }else{
+    let p=bfs(selected,hit);
+    selected=null;
+
+    if(p){
+      if(Math.random()<CREATE_PROB){
+        activePath=p;
+        persistentPaths.push([...p]); // ← store it
+        failedPath=[];
+      }else{
+        activePath=[];
+        failedPath=p;
+        wiggle=25;
+      }
+    }
+  }
+};
+
+gen();
+loop();
+</script>
+
+</body>
+</html>
